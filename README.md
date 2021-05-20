@@ -1,2 +1,2 @@
 # Nand2terris
-conputer system course project
+computer system course project
