@@ -39,5 +39,57 @@ CHIP CPU {
         pc[15];          // address of next instruction
 
     PARTS:
-    // Put your code here:
+    //template of instruction : 1  1  1  a  c1  c2  c3  c4  c5  c6  d1  d2  d3  j1  j2  j3
+    //                          15 14 13 12 11  10  9   8   7   6   5   4   3   2   1   0
+    // if instruction[15] == 0: a-instruction
+    //    instruction[15] == 1: c-instruction
+    Mux16(a=instruction, b=outALU, sel=instruction[15], out=outMux1); 
+    //The output of the 1st MuxGate may come directly from ROM's instruction or from computational result of ALU.
+    // outMux1 is the output of the 1st MuxGate
+    And(a=instruction[3], b=instruction[15], out=writeM); //if instruction[3] == 1, to M
+    And(a=instruction[4], b=instruction[15], out=writeD);  //if instruction[4] == 1, to D
+    And(a=instruction[5], b=instruction[15], out=insWriteA); //if instruction[5] == 1, to A
+    //Let instruction[3..5] decide where should the data be sent (to M/D/A? register)
+
+    Not(in=instruction[15], out=addWriteA); // if instruction[15] == 0, the output should be sent to Aregister too 
+    Or(a=insWriteA, b=addWriteA, out=writeA); // if instruction[5] == 1 or instruction[15] == 0, the output should be sent to Aregister.
+    ARegister(in=outMux1, load=writeA, out[0..14]=addressM, out=outRegA);
+    //if writeA == 1: out[0..14](15 bits) should be the addressM, out is the output of ARegister
+
+
+    //if instruction[12]==0, A should be one of the comp, else M should be one of the comp.
+    Mux16(a=outRegA, b=inM, sel=instruction[12], out=outMux2);
+    //outMux2 is the output of the second MuxGate.
+
+    //the value of DRegister comes from the output of ALU, if writeD, DRegister should send data to ALU.
+    DRegister(in=outALU, load=writeD, out=outRegD);
+    //instruction[6..11] corresponding to the six parameters of ALU, send outRegD and outMux2 into ALU
+    ALU(x=outRegD, y=outMux2, zx=instruction[11], nx=instruction[10], zy=instruction[9], ny=instruction[8], f=instruction[7], no=instruction[6], out=outALU, out=outM, zr=zero, ng=negative);
+
+    //Make some flag to compare the result with 0, these flags help me to implement the jump step.
+    Not(in=zero, out=notZero);
+    Not(in=negative, out=notNegative);
+    And(a=notZero, b=notNegative, out=positive);
+
+    //if c-instruction, there main catagories: <, =, >
+    //if instruction[0] == 1 --> out > 0 jump (positive)
+    //if instruction[1] == 1 --> out = 0 jump (zero)
+    //if instruction[2] == 1 --> out < 0 jump (negative)
+    And(a=instruction[0], b=instruction[15], out=insJumpPos);
+    And(a=instruction[1], b=instruction[15], out=insJumpZero);
+    And(a=instruction[2], b=instruction[15], out=insJumpNeg);
+
+    //if instruction wants to jump when positive and output is indeed positive, jump
+    And(a=insJumpPos, b=positive, out=jumpPos);
+    //if instruction wants to jump when zero and output is indeed zero, jump
+    And(a=insJumpZero, b=zero, out=jumpZero);
+    //if instruction wants to jump when negative and output is indeed negative, jump
+    And(a=insJumpNeg, b=negative, out=jumpNeg);
+    //As long as, one of above cases is true: jump (which including >=, <=, <>, unconditional)
+    Or(a=jumpPos, b=jumpZero, out=jump1);
+    Or(a=jump1, b=jumpNeg, out=jump2);
+    //notJump2 is the flag for not jumping
+    Not(in=jump2, out=notJump2);
+    //Use PC chip to allocate the address of the next instruction, with the help of above flags
+    PC(in=outRegA, load=jump2, inc=notJump2, reset=reset, out[0..14]=pc);
 }
